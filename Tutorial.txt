@@ -1,0 +1,203 @@
+==========================
+ TUTORIAL: orchestrator.sh
+==========================
+
+Autor: Exemplo
+Data: 2025-08-28
+Licença: Livre para uso/estudo
+
+---------------------------------
+ 1. O QUE É O ORCHESTRATOR.SH
+---------------------------------
+O `orchestrator.sh` é um sistema simples de orquestração de builds em Bash.
+Ele permite:
+
+ - Baixar código-fonte (wget, curl, git).
+ - Extrair arquivos compactados (tar.gz, tar.xz, zip, etc).
+ - Aplicar patches automaticamente.
+ - Compilar usando sistemas detectados (configure, CMake, Meson) ou etapas definidas.
+ - Instalar no diretório DESTDIR usando fakeroot.
+ - Empacotar binários resultantes em arquivos tar.zst ou tar.gz.
+ - Reinstalar a partir do pacote binário gerado.
+
+O funcionamento é parecido com sistemas de build como PKGBUILD (Arch Linux) ou ebuild (Gentoo),
+mas de forma simplificada em shell script puro.
+
+---------------------------------
+ 2. ESTRUTURA DE DIRETÓRIOS
+---------------------------------
+Um repositório típico terá a seguinte árvore:
+
+project/
+├── orchestrator.sh        ← Script principal de orquestração
+├── lib/
+│   └── buildlib.sh        ← Biblioteca com funções auxiliares
+└── recipes/
+    ├── hello-example.sh   ← Receita de exemplo (GNU hello)
+    ├── gcc.sh             ← Receita para GCC
+    ├── glibc.sh           ← Receita para glibc
+    └── firefox.sh         ← Receita para Firefox
+
+Diretórios de trabalho temporários:
+ - $WORK   → onde o código-fonte é baixado e extraído
+ - $DESTDIR → onde é feita a instalação fake (fakeroot)
+ - $OUT    → onde os pacotes binários finais são salvos
+
+---------------------------------
+ 3. INSTALAÇÃO E CONFIGURAÇÃO
+---------------------------------
+Requisitos de pacotes:
+  - bash, coreutils
+  - wget ou curl
+  - git
+  - tar, xz, gzip, unzip, bzip2, file
+  - patch
+  - make, gcc, g++
+  - fakeroot
+  - opcional: cmake, meson, ninja, zstd
+
+Clone o repositório de scripts:
+  git clone https://example.com/orchestrator.git
+  cd orchestrator
+
+Defina variáveis de ambiente antes de usar:
+  export WORK=/tmp/work
+  export DESTDIR=/tmp/dest
+  export OUT=/tmp/out
+
+---------------------------------
+ 4. COMANDOS DISPONÍVEIS
+---------------------------------
+
+(1) BUILD
+----------
+Compila e gera pacotes a partir de receitas:
+  ./orchestrator.sh build recipes/hello-example.sh
+
+Resultado:
+ - Baixa código
+ - Extrai e aplica patches
+ - Executa build
+ - Instala em DESTDIR
+ - Cria pacote tar.zst em $OUT
+
+(2) INSTALL-BIN
+----------------
+Instala pacotes binários já criados:
+  sudo ./orchestrator.sh install-bin $OUT/hello-2.12-x86_64.tar.zst /
+
+(3) BUILD+INSTALL
+------------------
+Compila e instala diretamente:
+  sudo ./orchestrator.sh build+install recipes/hello-example.sh /
+
+---------------------------------
+ 5. COMO ESCREVER UMA RECEITA
+---------------------------------
+Receitas são arquivos .sh localizados em recipes/.  
+Devem definir pelo menos as variáveis:
+
+  NAME="nome-do-pacote"
+  VERSION="1.0"
+  SRC_URL="https://exemplo.com/software-${VERSION}.tar.gz"
+  PATCH_URLS=( "https://exemplo.com/fix.patch" )
+  BUILD_STEPS=(
+    "./configure --prefix=$PREFIX"
+    "make -j$JOBS"
+    "make DESTDIR=$DESTDIR install"
+  )
+
+Hooks opcionais:
+  pre_fetch()   → executado antes de baixar
+  post_extract()→ executado após extrair
+  pre_build()   → executado antes de compilar
+  post_build()  → executado depois de compilar
+
+---------------------------------
+ 6. RECEITAS DE EXEMPLO
+---------------------------------
+
+(1) GCC
+---------
+Arquivo: recipes/gcc.sh
+
+NAME="gcc"
+VERSION="13.2.0"
+SRC_URL="https://ftp.gnu.org/gnu/gcc/gcc-${VERSION}/gcc-${VERSION}.tar.xz"
+PATCH_URLS=()
+BUILD_STEPS=(
+  "./contrib/download_prerequisites"
+  "mkdir -p build && cd build"
+  "../configure --prefix=$PREFIX --enable-languages=c,c++ --disable-multilib"
+  "make -j$JOBS"
+  "make DESTDIR=$DESTDIR install"
+)
+
+(2) GLIBC
+-----------
+Arquivo: recipes/glibc.sh
+
+NAME="glibc"
+VERSION="2.39"
+SRC_URL="https://ftp.gnu.org/gnu/libc/glibc-${VERSION}.tar.xz"
+PATCH_URLS=()
+BUILD_STEPS=(
+  "mkdir -p build && cd build"
+  "../configure --prefix=$PREFIX"
+  "make -j$JOBS"
+  "make DESTDIR=$DESTDIR install"
+)
+
+(3) FIREFOX
+-------------
+Arquivo: recipes/firefox.sh
+
+NAME="firefox"
+VERSION="128.0"
+SRC_URL="https://ftp.mozilla.org/pub/firefox/releases/${VERSION}/source/firefox-${VERSION}.source.tar.xz"
+PATCH_URLS=()
+BUILD_STEPS=(
+  "./mach bootstrap --application-choice=browser"
+  "./mach build -j$JOBS"
+  "./mach install --destdir=$DESTDIR --prefix=$PREFIX"
+)
+
+Observação: Firefox depende de várias libs e pode ser necessário instalar pacotes adicionais (rust, python3, nodejs, clang).
+
+---------------------------------
+ 7. EXEMPLO DE FLUXO COMPLETO
+---------------------------------
+
+# Preparar ambiente
+export WORK=/tmp/work
+export DESTDIR=/tmp/dest
+export OUT=/tmp/out
+
+# 1) Build do GCC
+./orchestrator.sh build recipes/gcc.sh
+
+# 2) Gerar pacote glibc
+./orchestrator.sh build recipes/glibc.sh
+
+# 3) Instalar Firefox diretamente
+sudo ./orchestrator.sh build+install recipes/firefox.sh /
+
+---------------------------------
+ 8. DICAS E BOAS PRÁTICAS
+---------------------------------
+ - Sempre use DESTDIR para não poluir o sistema durante o build.
+ - Use fakeroot quando empacotar para preservar permissões.
+ - Prefira BUILD_STEPS explícitos para projetos grandes (gcc, glibc, firefox).
+ - Use hooks (pre_fetch, post_build) para preparar dependências ou ajustes.
+ - Gere pacotes binários para reutilizar builds pesados em várias máquinas.
+
+---------------------------------
+ 9. CONCLUSÃO
+---------------------------------
+O `orchestrator.sh` fornece uma base simples para criar um sistema de build
+e empacotamento portátil. É altamente extensível e serve como ponto de partida
+para criar um "mini distro build system".
+
+====================
+FIM DO TUTORIAL
+====================
